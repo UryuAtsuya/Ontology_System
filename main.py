@@ -43,33 +43,71 @@ with tab_add:
     st.info("ここでデータを入力すると、SWRLルールにより推論タブで自動的に「高層」や「耐震基準」が判定されます。")
 
     if mgr.ontology:
+        # --- Auto-Complete Section ---
+        with st.expander("📝 自然言語から自動入力 (Auto-Complete)", expanded=False):
+            raw_text = st.text_area("建築物の説明を貼り付けてください", placeholder="例: 2020年に竣工した、高さ150mの横浜にある鉄骨造のオフィスビル。")
+            if st.button("AIで解析して入力"):
+                if raw_text:
+                    if "llm_client" in st.session_state:
+                         llm = st.session_state["llm_client"]
+                         
+                         # Options for mapping
+                         locs = mgr.get_individuals_of_type("都道府県")
+                         structs = mgr.get_individuals_of_type("構造種別値")
+                         uses = mgr.get_individuals_of_type("用途値")
+                         techs = mgr.get_individuals_of_type("耐震技術値")
+                         
+                         options = {
+                             "都道府県": [i.name for i in locs],
+                             "構造種別": [i.label.first() if i.label else i.name for i in structs],
+                             "用途": [i.name.replace("用途", "") for i in uses],
+                             "耐震技術": [i.label.first() if i.label else i.name for i in techs]
+                         }
+                         
+                         with st.spinner("Parsing..."):
+                             parsed = llm.parse_building_info(raw_text, options)
+                             st.session_state["parsed_data"] = parsed
+                             st.success("解析完了！下のフォームに反映されました。")
+                    else:
+                        st.error("AIモジュールが初期化されていません。APIキーを確認してください。")
+
+        # Get default values from parsed data
+        p_data = st.session_state.get("parsed_data", {})
+        
         with st.form("building_form"):
             col1, col2 = st.columns(2)
             
             with col1:
                 # 基本情報の入力
-                name = st.text_input("名称 (必須)", placeholder="例: 新宿パークタワー")
-                year = st.number_input("建築年", min_value=1800, max_value=2100, value=2024)
-                height = st.number_input("高さ (m)", min_value=0.0, value=30.0)
-                floors = st.number_input("階数", min_value=1, value=5)
+                name = st.text_input("名称 (必須)", value=p_data.get("名称", ""), placeholder="例: 新宿パークタワー")
+                year = st.number_input("建築年", min_value=1800, max_value=2100, value=int(p_data.get("建築年", 2024)))
+                height = st.number_input("高さ (m)", min_value=0.0, value=float(p_data.get("高さ_m", 30.0)))
+                floors = st.number_input("階数", min_value=1, value=int(p_data.get("階数", 5)))
             
             with col2:
                 # マスタデータの取得
                 locs = mgr.get_individuals_of_type("都道府県")
                 loc_map = {i.name: i for i in locs}
-                sel_loc = st.selectbox("場所にある", [""] + list(loc_map.keys()))
+                
+                # Try to match index
+                def get_idx(options, target):
+                    if not target: return 0
+                    try: return options.index(target) + 1
+                    except: return 0
+                
+                sel_loc = st.selectbox("場所にある", [""] + list(loc_map.keys()), index=get_idx(list(loc_map.keys()), p_data.get("場所にある")))
                 
                 structs = mgr.get_individuals_of_type("構造種別値")
                 struct_map = {i.label.first() if i.label else i.name : i for i in structs}
-                sel_struct = st.selectbox("構造種別を持つ", [""] + list(struct_map.keys()))
+                sel_struct = st.selectbox("構造種別を持つ", [""] + list(struct_map.keys()), index=get_idx(list(struct_map.keys()), p_data.get("構造種別を持つ")))
                 
                 uses = mgr.get_individuals_of_type("用途値")
                 use_map = {i.name.replace("用途", "") : i for i in uses}
-                sel_use = st.selectbox("用途を持つ", [""] + list(use_map.keys()))
+                sel_use = st.selectbox("用途を持つ", [""] + list(use_map.keys()), index=get_idx(list(use_map.keys()), p_data.get("用途を持つ")))
                 
                 techs = mgr.get_individuals_of_type("耐震技術値")
                 tech_map = {i.label.first() if i.label else i.name : i for i in techs}
-                sel_tech = st.selectbox("耐震技術を持つ", [""] + list(tech_map.keys()))
+                sel_tech = st.selectbox("耐震技術を持つ", [""] + list(tech_map.keys()), index=get_idx(list(tech_map.keys()), p_data.get("耐震技術を持つ")))
 
             submit = st.form_submit_button("Ontologyに追加")
             

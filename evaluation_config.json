@@ -1,0 +1,11 @@
+{
+    "experiment_name": "baseline_comparison_v1",
+    "models": [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro"
+    ],
+    "runs_per_query": 3,
+    "enable_factual_accuracy": false,
+    "ontology_file": "Ontology.txt",
+    "gold_standard_file": "gold_standard.csv"
+}

@@ -1,0 +1,15 @@
+# System
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Temporary/Output Data
+temp_*.owl
+eval_result_*.txt
+inference_results/
+runs/
+debug_log.txt
+test_old_runs1.txt

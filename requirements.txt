@@ -1,0 +1,14 @@
+streamlit
+owlready2
+graphviz
+google-generativeai
+
+pandas
+networkx
+pydantic
+
+rapidfuzz
+bert_score
+transformers
+torch
+sentencepiece

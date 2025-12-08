@@ -1,0 +1,154 @@
+⸻
+
+I. Ontology Keywords — Architecture × Seismic × Building
+
+———— Start of Ontology and SWRL/SQWRL Keyword Definitions –––––––––––––
+
+Following are explanations about key OWL concepts with examples in the Architecture × Seismic domain.
+	1.	About “Class” and “Super / Sub” relationship of two “Class”
+Keywords: “Class”, “Property”, “Super”, “Sub”, “Domain”, “Range”, “Super-Class”, “Sub-Class”, “AND”, “OR”, “NOT”.
+A Class is a concept that explains a kind of thing in detail (e.g., ‘建築物’, ‘装置’, ‘行政区画’).
+Thing is the most top class.
+“Super” names a broader concept; “Sub” names a narrower concept.
+Example: ‘積層ゴム支承’ (Sub) ⊑ ‘免震支承’ (Super) ⊑ ‘装置’ (Super).
+A Sub-Class is always included in its Super-Class: [A Sub Class is a Super Class] in the sense that every instance of the Sub is also an instance of the Super.
+Example: ‘高層建築物’ (Sub of ‘建築物’) is a ‘建築物’.
+	2.	About “Property” and Triple
+A triple has the form: <source Class> <Property> <target Class or Literal>. We say “Class-A Property Class-B”.
+Examples (object properties):
+
+	•	<建築物> **用途を持つ** <用途値>
+	•	<建築物> **耐震技術を持つ** <耐震技術値>
+	•	<建築物> **装置を有する** <装置>
+Example (datatype properties):
+	•	<建築物> **建築年** <xsd:integer>
+	•	<建築物> **階数** <xsd:integer>
+Targets can be combined logically:
+<b> 用途を持つ 病院用途 AND <b> 構造種別を持つ RC_v.
+
+	3.	About “Domain” and “Range”
+For <S> <P> <O>, the Domain is the subject class; the Range is the object class.
+Example: <建築物> 構造種別を持つ <構造種別値>.
+Domain/Range propagate to subclasses. From an equivalent-class axiom such as
+病院 ≡ 建築物 ⊓ (用途を持つ value 病院用途)
+the assertion <聖路加国際病院> 用途を持つ 病院用途 lets the reasoner infer 聖路加国際病院 ∈ 病院.
+	4.	About Rule (SWRL)
+A Rule has an Antecedent (condition) and Consequent (conclusion):
+If Antecedent Then Consequent.
+Example:
+Antecedent: 建築物(?b) ∧ 装置を有する(?b, ?d) ∧ 積層ゴム支承(?d)
+Consequent: 耐震技術を持つ(?b, 免震構造_v)
+NL: “If a building has a laminated rubber bearing device, then assign Base Isolation technology.”
+	5.	About Class Instance
+An Instance (Individual) is a real object of a class.
+Examples: ‘東京駅’, ‘東京都庁第一本庁舎’, ‘渋谷ヒカリエ’ ∈ ‘建築物’; ‘RC_v’, ‘SRC_v’, ‘S_v’, ‘木造_v’ ∈ ‘構造種別値’.
+	6.	About Inference on the Class and Instance
+Inference derives conclusions from rules and instance facts.
+Examples:
+
+	•	階数 ≥ 20 ⇒ classify as ‘高層建築物’.
+	•	装置を有する = 積層ゴム支承 ⇒ 耐震技術を持つ = 免震構造_v ⇒ classify as ‘免震建築物’.
+	•	建築年の境界（<1981 / 1981–1999 / ≥2000）から ‘耐震基準区分’ を自動付与。
+
+	7.	About Instance Axiom
+Instance axioms look like triples over individuals:
+渋谷ヒカリエ 用途を持つ 商業施設用途 ∧ 構造種別を持つ SRC_v ∧ 建築年 2012 ∧ 階数 34.
+
+— Notation & Conventions —
+	•	Prefix: ex: = http://example.org/seismic_architecture#
+	•	Triple: <S> <P> <O>; AND = ∧, OR = ∨, NOT = ¬.
+	•	Datatypes: 建築年 = xsd:integer（数値比較のため）, 階数 = xsd:integer, 高さ_m = xsd:decimal.
+	•	Functional properties (1値制約): 場所にある, 構造種別を持つ, 建築年.
+	•	値クラスの相互排他: 用途値, 構造種別値, 耐震技術値, 耐震等級, 耐震基準区分 は pairwise disjoint.
+
+===========================================  Ontology Summary (aligned with the pasted RDF)  ===============================
+
+Core classes（抜粋）: 建築物, 装置（免震支承 ⊐ 積層ゴム支承 / すべり支承; 制震ダンパ ⊐ 粘性ダンパ / 鋼材ダンパ）, 行政区画, 高層建築物, 値クラス 構造種別値, 用途値, 耐震技術値, 耐震等級, 耐震基準区分, 法関連 建築基準法基準, 状態 構造計算, 耐震診断, 耐震改修.
+
+Object properties（Domain→Range）:
+上位区画: 行政区画→行政区画 (Transitive) / 場所にある: 建築物→行政区画 (Functional) /
+構造種別を持つ: 建築物→構造種別値 (Functional) / 用途を持つ: 建築物→用途値 /
+耐震基準区分を持つ: 建築物→耐震基準区分 / 耐震技術を持つ: 建築物→耐震技術値 /
+耐震等級を持つ: 建築物→耐震等級 / 装置を有する: 建築物→装置 /
+重要度区分を持つ: 建築物→重要度区分 / 建築基準法基準を持つ: 建築物→建築基準法基準 /
+構造計算が必要 / 耐震診断を受けた / 耐震改修を行った: 建築物→各状態.
+
+Datatype properties:
+名称（string）, 延床面積_m2（decimal）, 建築年（integer・Functional）, 階数（integer）, 高さ_m（decimal）.
+
+代表個体（例）:
+構造種別値: RC_v,SRC_v,S_v,木造_v / 耐震技術値: 免震構造_v,制震構造_v,耐震構造_v /
+用途値: オフィス用途,データセンター用途,交通拠点用途,公共施設用途,商業施設用途,教育施設用途,文化施設用途,病院用途,防災施設用途 /
+行政区画: 東京都,北海道,神奈川県,… / 装置: 横浜庁舎_積層ゴム1, 石狩_積層ゴム1, 聖路加_積層ゴム1 /
+建築物: 東京都庁第一本庁舎,渋谷ヒカリエ,東京スカイツリー,横浜市庁舎,石狩データセンター,…（RDFどおり）。
+
+SWRL（抜粋・RDFに一致）:
+	•	重要度: 病院用途 / 防災施設用途 / 交通拠点用途 ⇒ 高重要度_v
+	•	基準区分: <1981 ⇒ 旧耐震_v; 1981–1999 ⇒ 新耐震1981_v; ≥2000 ⇒ 2000基準_v
+	•	高層: 階数 ≥ 20 ⇒ 高層建築物
+	•	デバイス→技術: 免震支承 ⇒ 免震構造_v; 制震ダンパ ⇒ 制震構造_v
+	•	区分→法基準: 旧耐震_v→旧耐震基準値, 新耐震1981_v→新耐震基準値, 2000基準_v→品確法基準値.
+
+––––––––––––––––  SQWRL Queries (10+ ready-to-run)  ––––––––––––––––
+
+変数: ?b(建築物), ?name(名称), ?y(年), ?f(階数), ?h(高さ), ?area(行政区画), ?stype(構造種別), ?use(用途), ?d(装置), ?cnt(件数)
+
+Q1. 免震建築物の名称一覧（既存）
+Body: 免震建築物(?b) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?b, ?name)
+
+Q2. 2000年以降の高層・病院（既存）
+Body: 病院(?b) ∧ 高層建築物(?b) ∧ 建築年(?b, ?y) ∧ swrlb:greaterThanOrEqual(?y, 2000)
+Head: sqwrl:select(?b, ?y)
+
+Q3. 高重要度の建築物名称（既存）
+Body: 建築物(?b) ∧ 重要度区分を持つ(?b, 高重要度_v) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?b, ?name)
+
+Q4. 東京都にある制震建築物の名称と年
+Body: 建築物(?b) ∧ 場所にある(?b, 東京都) ∧ 耐震技術を持つ(?b, 制震構造_v) ∧ 建築年(?b, ?y) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?name, ?y)
+
+Q5. 旧耐震（<1981）の建築物一覧（名称・年）
+Body: 建築物(?b) ∧ 建築年(?b, ?y) ∧ swrlb:lessThan(?y, 1981) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?name, ?y)
+
+Q6. 1990年代のSRC造×公共施設（名称・年）
+Body: 建築物(?b) ∧ 構造種別を持つ(?b, SRC_v) ∧ 用途を持つ(?b, 公共施設用途) ∧ 建築年(?b, ?y) ∧ swrlb:greaterThanOrEqual(?y, 1990) ∧ swrlb:lessThan(?y, 2000) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?name, ?y)
+
+Q7. 免震装置を持つ建築物と装置のペア
+Body: 建築物(?b) ∧ 装置を有する(?b, ?d) ∧ 免震支承(?d) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?name, ?d)
+
+Q8. 商業施設用途の高層建築 Top5（高さ降順）
+Body: 高層建築物(?b) ∧ 用途を持つ(?b, 商業施設用途) ∧ 高さ_m(?b, ?h) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?name, ?h) ∧ sqwrl:orderByDescending(?h) ∧ sqwrl:limit(5)
+
+Q9. 都道府県別の建築物件数（グルーピング）
+Body: 建築物(?b) ∧ 場所にある(?b, ?area)
+Head: sqwrl:select(?area, ?cnt) ∧ sqwrl:count(?cnt) ∧ sqwrl:groupBy(?area)
+
+Q10. 年別の高層建築物件数（グルーピング）
+Body: 高層建築物(?b) ∧ 建築年(?b, ?y)
+Head: sqwrl:select(?y, ?cnt) ∧ sqwrl:count(?cnt) ∧ sqwrl:groupBy(?y) ∧ sqwrl:orderBy(?y)
+
+Q11. 構造種別ごとの件数（RC/SRC/S/木造）
+Body: 建築物(?b) ∧ 構造種別を持つ(?b, ?stype)
+Head: sqwrl:select(?stype, ?cnt) ∧ sqwrl:count(?cnt) ∧ sqwrl:groupBy(?stype)
+
+Q12. データセンター用途（2000年以降）の名称・年
+Body: 建築物(?b) ∧ 用途を持つ(?b, データセンター用途) ∧ 建築年(?b, ?y) ∧ swrlb:greaterThanOrEqual(?y, 2000) ∧ 名称(?b, ?name)
+Head: sqwrl:select(?name, ?y)
+
+（必要に応じて 上位区画 を使ったエリア包含のクエリも追加できます。例：場所にある(?b, ?a) ∧ 上位区画(?a, 東京都) で東京都配下の区市町村を包含。）
+
+––––––––––––––––  Few-shot style mini prompts  ––––––––––––––––
+	•	Task A: 「装置を有する b と、その装置 d が ‘積層ゴム支承’ であることが分かっている。b の ‘耐震技術を持つ’ は何か？」
+Hint: R_免震_装置から技術を適用。
+	•	Task B: 「名称と年から、年≥2000 なら ‘耐震基準区分を持つ(b, 2000基準_v)’ を導けるか？」
+Hint: R_2000基準 → R_法基準_2000基準。
+	•	Task C: 「階数≥20 の建物の名称を列挙」
+Hint: R_高層判定後に 高層建築物 ∧ 名称 を select。
+
+============================================== END =============================

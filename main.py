@@ -46,7 +46,7 @@ with tab_add:
         # --- Auto-Complete Section ---
         with st.expander("📝 自然言語から自動入力 (Auto-Complete)", expanded=False):
             raw_text = st.text_area("建築物の説明を貼り付けてください", placeholder="例: 2020年に竣工した、高さ150mの横浜にある鉄骨造のオフィスビル。")
-            if st.button("AIで解析して入力"):
+            if st.button("Extract & Auto-fill (AI解析)"):
                 if raw_text:
                     if "llm_client" in st.session_state:
                          llm = st.session_state["llm_client"]
@@ -219,7 +219,8 @@ with tab_ai:
                     if retriever and llm:
                         context_items = retriever.semantic_search(prompt)
                         context_str = retriever.format_context_for_llm(context_items)
-                        response_text = llm.generate_response(prompt, context_str)
+                        # Pass context_items to enable Dynamic Few-Shot generation
+                        response_text = llm.generate_response(prompt, context_str, retrieved_items=context_items)
                     else:
                         response_text = "AI modules not initialized. Please check API Key."
                     

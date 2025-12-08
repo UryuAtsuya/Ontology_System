@@ -22,75 +22,73 @@ class HybridRetriever:
 
     def semantic_search(self, query: str) -> List[Dict[str, Any]]:
         """
-        Performs a hybrid search:
-        1. Vector Search (Real implementation using Gemini Embeddings)
-        2. Ontology Search (Keyword/Graph traversal)
-        3. Result Fusion
+        Performs a hybrid search with Keyword Boosting:
+        1. Access Vector Store
+        2. Compute Cosine Similarity
+        3. Boost score if query keywords appear in Building Name
+        4. Return Top K
         """
         results: List[Dict[str, Any]] = []
-        seen_uris = set()
-
-        # Pre-compute embeddings for ontology individuals if not done
-        # Note: In a real app, this should be done asynchronously or pre-loaded
+        
+        # Ensure Vector Store is ready
         if self.llm_client and not self.vector_store and self.om.ontology:
             print("Initializing Vector Store (generating embeddings)...")
             for ind in self.om.ontology.individuals():
-                # Create a rich textual representation
-                props_text = ", ".join([f"{p.name}: {v}" for p in ind.get_properties() for v in p[ind]])
                 classes = [c.name for c in ind.is_a if hasattr(c, 'name')]
+                # Rich text for embedding
+                props_text = ", ".join([f"{p.name}: {v}" for p in ind.get_properties() for v in p[ind]])
                 text = f"Building Name: {ind.name}. Type: {', '.join(classes)}. Details: {props_text}"
                 
                 self.ids_to_text[ind.iri] = text
                 self.vector_store[ind.iri] = self.llm_client.get_embedding(text)
 
-        # 1. Vector Search
-        if self.llm_client and self.vector_store:
-            query_embedding = self.llm_client.get_embedding(query)
-            scores = []
-            for uri, embedding in self.vector_store.items():
-                score = self._compute_cosine_similarity(query_embedding, embedding)
-                scores.append((score, uri))
-            
-            # Get Top 3 Semantic Matches
-            top_k = sorted(scores, key=lambda x: x[0], reverse=True)[:3]
-            for score, uri in top_k:
-                if score > 0.4: # Threshold
-                    ind = self.om.ontology.search_one(iri=uri)
-                    if ind:
-                        results.append({
-                            "uri": ind.iri,
-                            "name": ind.name,
-                            "type": [c.name for c in ind.is_a if hasattr(c, 'name')],
-                            "source": f"Vector (Score: {score:.2f})",
-                            "details": self.ids_to_text.get(uri, "")
-                        })
-                        seen_uris.add(uri)
+        if not self.vector_store or not self.llm_client:
+            return []
 
-        # 2. Ontology Search (Keyword Match)
-        if self.om.ontology:
-            for ind in self.om.ontology.individuals():
-                if ind.iri in seen_uris: continue
+        query_embedding = self.llm_client.get_embedding(query)
+        scored_candidates = []
+
+        # Keywords for boosting
+        keywords = query.lower().split()
+
+        for uri, embedding in self.vector_store.items():
+            base_score = self._compute_cosine_similarity(query_embedding, embedding)
+            final_score = base_score
+            
+            # Retrieve entity info to check name
+            ind = self.om.ontology.search_one(iri=uri)
+            if ind:
+                # KEYWORD BOOSTING
+                name_lower = ind.name.lower()
+                if any(k in name_lower for k in keywords if len(k) > 1):
+                    final_score *= 1.2 # Boost by 20%
                 
-                search_text = f"{ind.name} {' '.join([str(v) for v in ind.get_properties()])}"
-                if query.lower() in search_text.lower():
-                    results.append({
-                        "uri": ind.iri,
-                        "name": ind.name,
-                        "type": [c.name for c in ind.is_a if hasattr(c, 'name')],
-                        "source": "Keyword"
-                    })
-                    seen_uris.add(ind.iri)
+                scored_candidates.append((final_score, ind))
+
+        # Sort by Final Score and take Top 5
+        top_k = sorted(scored_candidates, key=lambda x: x[0], reverse=True)[:5]
+        
+        for score, ind in top_k:
+            if score > 0.4: # Threshold
+                results.append({
+                    "uri": ind.iri,
+                    "name": ind.name,
+                    "type": [c.name for c in ind.is_a if hasattr(c, 'name')],
+                    "score": score,
+                    "details": self.ids_to_text.get(ind.iri, "")
+                })
         
         return results
 
     def format_context_for_llm(self, retrieved_items: List[Dict[str, Any]]) -> str:
-        """Formats retrieved items into a context string for the LLM."""
+        """Formats retrieved items into a context string for the LLM using citation format."""
         if not retrieved_items:
             return "No specific reference information found in ontology."
 
         items_str = ""
         for item in retrieved_items:
-            items_str += f"- Entity: {item['name']} (Type: {', '.join(item['type'])})\n"
-            items_str += f"  URI: {item['uri']}\n"
+            # Using @entity{URI, label, type} format as requested
+            items_str += f"@entity{{URI={item['uri']}, label='{item['name']}', type='{','.join(item['type'])}'}}\n"
+            items_str += f"Description: {item.get('details', '')}\n"
         
         return CONTEXT_TEMPLATE.format(context_items=items_str)

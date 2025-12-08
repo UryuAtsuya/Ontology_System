@@ -71,22 +71,32 @@ class OntologyManager:
             
             return new_building
 
+    def get_explanation_for_class(self, class_name):
+        """
+        指定されたクラスに分類された理由（自然言語の説明）を返す
+        """
+        # SWRLルールの説明マッピング (論文用デモ定義)
+        # swrl_examples.md や main.py の記載に基づく
+        RULE_EXPLANATIONS = {
+            # クラス名: 説明
+            "高層建築物": "高さが60m以上 (Height >= 60m)",
+            "2000基準": "2000年以降に建築 (Year >= 2000)",
+            "旧耐震基準": "1981年以前に建築 (Year < 1981)",
+            "新耐震基準": "1981年以降に建築 (Year >= 1981)",
+            "長周期地震動注意建築物": "高さ60m以上の鉄骨造 (Height >= 60m AND Structure = Steel)",
+            "免震建築物": "免震構造を持つ (Has Seismic Isolation)",
+            "制震建築物": "制震構造を持つ (Has Damping Structure)",
+            "歴史的建造物": "築50年以上 (Age > 50 years)",
+            "木造建築物": "構造が木造 (Structure = Wood)",
+            "オフィス建築物": "用途がオフィス (Usage = Office)",
+            "商業施設": "用途が商業施設 (Usage = Commercial)",
+        }
+        
+        return RULE_EXPLANATIONS.get(class_name, None)
+
     def get_matching_rules(self, class_name):
-        """
-        指定されたクラスを結論（Head）に持つSWRLルールを検索して返す
-        """
-        if not self.ontology: return []
-        
-        matching_rules = []
-        for rule in self.ontology.rules():
-            # ルールの構造を文字列化して解析 (簡易的)
-            # "Rule( ... -> Class(?x) )" のような形式
-            rule_str = str(rule)
-            # 結論部分（-> の右側）にクラス名が含まれているかチェック
-            if f"-> {class_name}(" in rule_str or f"-> {class_name} ?" in rule_str:
-                 matching_rules.append(rule_str)
-        
-        return matching_rules
+        # Backward compatibility or fallback if needed
+        return []
 
     def run_reasoner(self):
         """Pellet推論機を実行し、推論結果とその説明（根拠）を返す"""
@@ -118,12 +128,11 @@ class OntologyManager:
                 ind_report["classes"] = current_classes
                 
                 for cls_name in current_classes:
-                    # そのクラスを導くルールがあるか検索
-                    rules = self.get_matching_rules(cls_name)
-                    if rules:
-                        # ルールが見つかった場合、それを根拠として追加
-                        # 将来的には、そのルールの条件（Body）が満たされているかの詳細チェックも可能
-                        ind_report["explanations"][cls_name] = rules
+                    # そのクラスを導く「自然言語の説明」を取得
+                    explanation = self.get_explanation_for_class(cls_name)
+                    if explanation:
+                        # 説明が見つかった場合、リストとして追加（既存のUIコードとの互換性のため）
+                        ind_report["explanations"][cls_name] = [explanation]
                 
                 if ind_report["explanations"]:
                     explanation_report.append(ind_report)

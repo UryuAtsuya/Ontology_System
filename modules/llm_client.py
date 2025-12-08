@@ -29,15 +29,40 @@ class LLMClient:
         else:
             # デフォルトのシステムプロンプト
             final_system_prompt = system_prompt
+        """
+        検索されたエンティティを元に、Few-Shot（Q&A）形式の例を生成する
+        """
+        examples_str = ""
+        for item in retrieved_items[:2]: # Use top 2 as examples
+            examples_str += f"""
+Example Q: Tell me about {item['name']}.
+Example A: {item['name']} (URI: {item['uri']}) is a {', '.join(item['type'])}. It is located in {item['name'][:2]}... (Detailed attributes from ontology).
+"""
+        return examples_str
 
-        model = genai.GenerativeModel(
-            model_name=self.model_name,
-            system_instruction=final_system_prompt,
-            generation_config={"temperature": 0.2}
-        )
-        
+    def generate_response(self, prompt, context_str="", retrieved_items=None):
+        """
+        コンテキスト（および検索結果からのFew-Shot例）を用いて回答を生成する
+        """
+        few_shot_section = ""
+        if retrieved_items:
+            examples = self.generate_fewshot_examples(retrieved_items)
+            few_shot_section = f"\nRefer to these similar cases for style:\n{examples}\n"
+
+        system_instruction = "You are an expert architect assistant. Use the provided context to answer."
+        final_prompt = f"""
+{system_instruction}
+
+Context from Ontology:
+{context_str}
+
+{few_shot_section}
+
+Question: {prompt}
+Answer:
+"""
         try:
-            response = model.generate_content(f"Context:\n{context}\n\nQuestion: {prompt}")
+            response = self.model.generate_content(final_prompt)
             return response.text
         except Exception as e:
             return f"Error generating response: {str(e)}"

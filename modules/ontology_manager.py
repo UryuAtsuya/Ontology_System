@@ -71,16 +71,71 @@ class OntologyManager:
             
             return new_building
 
+    def get_matching_rules(self, class_name):
+        """
+        指定されたクラスを結論（Head）に持つSWRLルールを検索して返す
+        """
+        if not self.ontology: return []
+        
+        matching_rules = []
+        for rule in self.ontology.rules():
+            # ルールの構造を文字列化して解析 (簡易的)
+            # "Rule( ... -> Class(?x) )" のような形式
+            rule_str = str(rule)
+            # 結論部分（-> の右側）にクラス名が含まれているかチェック
+            if f"-> {class_name}(" in rule_str or f"-> {class_name} ?" in rule_str:
+                 matching_rules.append(rule_str)
+        
+        return matching_rules
+
     def run_reasoner(self):
-        """Pellet推論機を実行し、SWRLルールを適用"""
-        if not self.ontology: return "Ontology not loaded"
+        """Pellet推論機を実行し、推論結果とその説明（根拠）を返す"""
+        if not self.ontology: return {"status": "Error", "message": "Ontology not loaded"}
+        
         try:
+            # 推論前のクラス所属を記録（オプション、変化を見る場合）
+            # pre_inference_state = {}
+            # for ind in self.ontology.individuals():
+            #    pre_inference_state[ind.name] = [c.name for c in ind.is_a if hasattr(c, "name")]
+
             with self.ontology:
                 # infer_property_values=True でデータプロパティ推論も有効化
                 sync_reasoner_pellet(infer_property_values=True, infer_data_property_values=True)
-            return "Reasoning Completed: Rules applied."
+            
+            # 推論後の説明レポート作成
+            explanation_report = []
+            
+            # 全個体をスキャンして、推論によって付与された可能性のあるクラスを特定
+            # ここでは簡単のため、"is_a" に含まれる各クラスについてルールを探す
+            for ind in self.ontology.individuals():
+                ind_report = {
+                    "name": ind.name,
+                    "classes": [],
+                    "explanations": {}
+                }
+                
+                current_classes = [c.name for c in ind.is_a if hasattr(c, "name")]
+                ind_report["classes"] = current_classes
+                
+                for cls_name in current_classes:
+                    # そのクラスを導くルールがあるか検索
+                    rules = self.get_matching_rules(cls_name)
+                    if rules:
+                        # ルールが見つかった場合、それを根拠として追加
+                        # 将来的には、そのルールの条件（Body）が満たされているかの詳細チェックも可能
+                        ind_report["explanations"][cls_name] = rules
+                
+                if ind_report["explanations"]:
+                    explanation_report.append(ind_report)
+
+            return {
+                "status": "Success", 
+                "message": "Reasoning Completed: Rules applied.",
+                "report": explanation_report
+            }
+
         except Exception as e:
-            return f"Reasoning Failed: {e}"
+            return {"status": "Error", "message": f"Reasoning Failed: {e}"}
 
     def visualize_building(self, building_ind):
         """特定の建築物に関するグラフを生成"""

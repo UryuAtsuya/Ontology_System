@@ -130,19 +130,29 @@ def render_reasoning_engine_tab(om):
             result = om.run_reasoner()
             st.session_state["inference_result"] = result
             
-            if result["status"] == "success":
+            # Handle the dictionary response from updated run_reasoner
+            if isinstance(result, dict) and result.get("status") == "Success":
                 st.success(result["message"])
-                if result["inconsistent_classes"]:
-                    st.error(f"Inconsistent Classes: {result['inconsistent_classes']}")
                 
-                if "output_log" in result and result["output_log"]:
-                    with st.expander("Show Inference Log (Reparenting Details)", expanded=True):
-                        st.text(result["output_log"])
+                # Show Explainability Report
+                if "report" in result and result["report"]:
+                    st.markdown("### 🧠 Reasoning Explanation (Traceability)")
+                    for item in result["report"]:
+                        with st.expander(f"🏗️ {item['name']} (Classes: {', '.join(item['classes'])})"):
+                            if item["explanations"]:
+                                st.markdown("#### 📝 Why?")
+                                for cls, rules in item["explanations"].items():
+                                    st.markdown(f"**Classified as `{cls}` because:**")
+                                    for r in rules:
+                                        st.code(r, language="text")
+                            else:
+                                st.info("No specific SWRL rules triggered for this individual.")
+
+            elif isinstance(result, dict) and result.get("status") == "Error":
+                 st.error(result["message"])
             else:
-                st.error(result["message"])
-                if "output_log" in result and result["output_log"]:
-                    with st.expander("Show Error Log"):
-                        st.text(result["output_log"])
+                 # Fallback
+                 st.write(result)
             
     st.subheader("SWRL Rule Editor")
     rule_text = st.text_area("Edit Rules (Format: Class(?x) ^ hasVal(?x,?y) -> NewProp(?x,?z))", height=150)

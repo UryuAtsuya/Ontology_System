@@ -41,3 +41,19 @@ class LLMClient:
             return response.text
         except Exception as e:
             return f"Error generating response: {str(e)}"
+
+    def get_embedding(self, text):
+        """
+        テキストの埋め込みベクトルを取得
+        """
+        try:
+            result = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+                task_type="retrieval_document",
+                title="Ontology Entity"
+            )
+            return result['embedding']
+        except Exception as e:
+            print(f"Error generating embedding: {e}")
+            return []

@@ -158,408 +158,20 @@ def bertscore_f1(reference: str, candidate: str) -> float:
     if not _BERT_OK:
         return float('nan')
     try:
+        # Default with baseline rescale
         P, R, F1 = bert_score.score([candidate], [reference], lang="ja", rescale_with_baseline=True)
         return float(F1[0])
-    except Exception:
+    except Exception as e:
+        # Debug print
+        # print(f"[BERTScore Error] {e}") 
         try:
+            # Fallback without rescale
             P, R, F1 = bert_score.score([candidate], [reference], lang="ja", rescale_with_baseline=False)
             return float(F1[0])
-        except Exception:
+        except Exception as e2:
+            print(f"[BERTScore Failed] {e2}")
             return float('nan')
 
-# diversity
-def distinct_n(corpus: List[str], n: int) -> float:
-    all_ngrams = set()
-    total = 0
-    for s in corpus:
-        toks = tokenize_words(s)
-        grams = ngrams(toks, n)
-        total += max(len(grams), 1)
-        all_ngrams.update(grams)
-    return len(all_ngrams) / max(total, 1)
-
-# -------------------------- Factual Accuracy (NLI) --------------------------
-
-@dataclass
-class FactualScores:
-    nli_entail_rate: float
-    evidence_recall: float
-
-def build_nli_pipeline(model_name: str = "joeddav/xlm-roberta-large-xnli"):
-    if not _TRANSFORMERS_OK:
-        return None
-    try:
-        clf = pipeline("text-classification", model=model_name, tokenizer=model_name)
-        return clf
-    except Exception:
-        return None
-
-def nli_entailment_rate(answer: str, gold_sentences: List[str], clf) -> float:
-    if not clf or not gold_sentences:
-        return 0.0
-    ans_sents = safe_split_sentences(answer)
-    if not ans_sents:
-        return 0.0
-    entailed = 0
-    for s in ans_sents:
-        ok = False
-        for g in gold_sentences:
-            try:
-                res = clf({"text": g, "text_pair": s}, return_all_scores=True)
-                scores = res[0] if isinstance(res, list) else res
-                best = max(scores, key=lambda x: x.get("score", 0.0))
-                label = best.get("label", "").upper()
-                if "ENTAIL" in label:
-                    ok = True
-                    break
-            except Exception:
-                continue
-        if ok:
-            entailed += 1
-    return entailed / max(len(ans_sents), 1)
-
-def evidence_ngram_recall(answer: str, gold_text: str, n: int = 2) -> float:
-    ans_toks = simple_tokenize(answer)
-    gold_toks = simple_tokenize(gold_text)
-    if not ans_toks or not gold_toks:
-        return 0.0
-    gold_ngrams = ngram_set(gold_toks, n=n)
-    ans_ngrams = ngram_set(ans_toks, n=n)
-    inter = len(gold_ngrams & ans_ngrams)
-    return inter / max(len(gold_ngrams), 1)
-
-def compute_factual_scores(answer: str, gold_text: str, clf) -> FactualScores:
-    gold_sents = safe_split_sentences(gold_text)
-    entail_rate = nli_entailment_rate(answer, gold_sents, clf) if clf else 0.0
-    ev_recall = evidence_ngram_recall(answer, gold_text, n=2)
-    return FactualScores(nli_entail_rate=entail_rate, evidence_recall=ev_recall)
-
-# -------------------------- Database Logging --------------------------
-
-def init_sqlite(db_path: str):
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS runs (
-          run_id TEXT PRIMARY KEY,
-          timestamp REAL,
-          query TEXT,
-          model TEXT,
-          runs INTEGER,
-          fewshot_file TEXT,
-          gold_file TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS answers (
-          run_id TEXT,
-          mode TEXT,
-          idx INTEGER,
-          text TEXT,
-          PRIMARY KEY (run_id, mode, idx)
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS metrics (
-          run_id TEXT PRIMARY KEY,
-          acc_fs_mean REAL,
-          acc_zs_mean REAL,
-          bert_fs_mean REAL,
-          bert_zs_mean REAL,
-          diff_vocab_count INTEGER,
-          factual_fs_mean REAL,
-          factual_zs_mean REAL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-def log_to_sqlite(db_path: str, run_id: str, meta: Dict, results: Dict):
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    
-    # Insert Run
-    cur.execute("""
-        INSERT OR REPLACE INTO runs(run_id, timestamp, query, model, runs, fewshot_file, gold_file)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
-        run_id, time.time(), meta["query"], meta["model"], meta["runs"], meta.get("fewshot_file", ""), meta.get("gold_file", "")
-    ))
-    
-    # Insert Answers
-    for i, txt in enumerate(results["fewshot_answers"]):
-        cur.execute("INSERT OR REPLACE INTO answers VALUES (?, ?, ?, ?)", (run_id, "fewshot", i, txt))
-    for i, txt in enumerate(results["zeroshot_answers"]):
-        cur.execute("INSERT OR REPLACE INTO answers VALUES (?, ?, ?, ?)", (run_id, "zeroshot", i, txt))
-        
-    # Insert Metrics
-    # Calculate means
-    def mean(xs): return sum(xs)/len(xs) if xs else 0.0
-    
-    acc_fs = mean(results["metrics_fs"]["ROUGE-L"]) # Using ROUGE-L as proxy for general accuracy in summary
-    acc_zs = mean(results["metrics_zs"]["ROUGE-L"])
-    
-    bert_fs = mean(results["metrics_fs"].get("BERTScore", []))
-    bert_zs = mean(results["metrics_zs"].get("BERTScore", []))
-    
-    fact_fs = 0.0
-    if results.get("factual_fs"):
-        fact_fs = mean([(x.nli_entail_rate + x.evidence_recall)/2 for x in results["factual_fs"]])
-        
-    fact_zs = 0.0
-    if results.get("factual_zs"):
-        fact_zs = mean([(x.nli_entail_rate + x.evidence_recall)/2 for x in results["factual_zs"]])
-
-    cur.execute("""
-        INSERT OR REPLACE INTO metrics VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        run_id, acc_fs, acc_zs, bert_fs, bert_zs, len(results["diff_tokens"]), fact_fs, fact_zs
-    ))
-    
-    conn.commit()
-    conn.close()
-
-# -------------------------- Gemini wrapper --------------------------
-
-def call_gemini(prompt: str, system_instruction: str | None = None, model_name: str = "gemini-1.5-flash", max_retries: int = 3, api_key: str = "") -> str:
-    if api_key:
-        genai.configure(api_key=api_key)
-    
-    for attempt in range(max_retries):
-        try:
-            model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
-            resp = model.generate_content(prompt)
-            if hasattr(resp, "text") and resp.text:
-                return resp.text.strip()
-            time.sleep(1.0)
-        except Exception as e:
-            if attempt == max_retries - 1:
-                return f"Error: {e}"
-            time.sleep(1.5 * (attempt + 1))
-    return "Error: Empty Response"
-
-# -------------------------- qualitative --------------------------
-
-def qualitative_diff(fewshot_answers: List[str], zeroshot_answers: List[str], top_k: int = 20) -> List[Tuple[str, int]]:
-    fs = " ".join(fewshot_answers).lower()
-    zs = " ".join(zeroshot_answers).lower()
-    fs_tokens = Counter(tokenize_words(fs))
-    zs_tokens = Counter(tokenize_words(zs))
-    diff = fs_tokens - zs_tokens
-    return diff.most_common(top_k)
-
-def worst_examples(reference: str, candidates: List[str], k: int = 3) -> List[Tuple[int, float, str]]:
-    scored = []
-    for i, c in enumerate(candidates):
-        s = rouge_l_f1(reference, c)
-        scored.append((i, s, c))
-    scored.sort(key=lambda x: x[1])
-    return scored[:k]
-
-# -------------------------- Main Evaluator Class --------------------------
-
-class GeminiEvaluator:
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-
-    def run_evaluation(
-        self,
-        query: str,
-        fewshot_doc: str,
-        runs: int = 5,
-        model_name: str = "gemini-1.5-flash",
-        gold_text: str | None = None,
-        enable_factual: bool = False,
-        progress_callback: Callable[[float, str], None] | None = None
-    ) -> Dict[str, Any]:
-        
-        system_instruction = "You are a helpful domain expert. Answer concisely and factually."
-        prompt_fs = f"{fewshot_doc}\n\n[Query]\n{query}"
-        prompt_zs = query
-
-        # 1. Collect Few-shot
-        fewshot_answers: List[str] = []
-        for i in range(runs):
-            if progress_callback:
-                progress_callback((i) / (runs * 2), f"Collecting Few-shot response {i+1}/{runs}...")
-            fewshot_answers.append(call_gemini(prompt_fs, system_instruction, model_name=model_name, api_key=self.api_key))
-
-        # 2. Collect Zero-shot
-        zeroshot_answers: List[str] = []
-        for i in range(runs):
-            if progress_callback:
-                progress_callback((runs + i) / (runs * 2), f"Collecting Zero-shot response {i+1}/{runs}...")
-            zeroshot_answers.append(call_gemini(prompt_zs, system_instruction, model_name=model_name, api_key=self.api_key))
-
-        if progress_callback:
-            progress_callback(1.0, "Calculating metrics...")
-
-        reference = fewshot_answers[0] if fewshot_answers else ""
-
-        # 3. Quantitative Metrics (Standard)
-        def eval_all(cands: List[str]) -> Dict[str, List[float]]:
-            mets = {
-                "EditSim": [],
-                "TokenF1": [],
-                "Jaccard": [],
-                "ROUGE-L": [],
-                "chrF": [],
-            }
-            if _BERT_OK:
-                mets["BERTScore"] = []
-            for c in cands:
-                mets["EditSim"].append(edit_sim(reference, c))
-                mets["TokenF1"].append(token_f1(reference, c))
-                mets["Jaccard"].append(jaccard(reference, c))
-                mets["ROUGE-L"].append(rouge_l_f1(reference, c))
-                mets["chrF"].append(chrF(reference, c))
-                if _BERT_OK:
-                    mets["BERTScore"].append(bertscore_f1(reference, c))
-            return mets
-
-        metrics_fs = eval_all(fewshot_answers)
-        metrics_zs = eval_all(zeroshot_answers)
-
-        # 4. Factual Accuracy (Optional)
-        factual_fs: List[FactualScores] = []
-        factual_zs: List[FactualScores] = []
-        
-        if enable_factual and gold_text:
-            if progress_callback:
-                progress_callback(1.0, "Loading NLI model (this may take a while)...")
-            
-            clf = build_nli_pipeline()
-            if clf:
-                if progress_callback:
-                    progress_callback(1.0, "Computing Factual Scores...")
-                
-                for a in fewshot_answers:
-                    factual_fs.append(compute_factual_scores(a, gold_text, clf))
-                for a in zeroshot_answers:
-                    factual_zs.append(compute_factual_scores(a, gold_text, clf))
-            else:
-                # Fallback if NLI fails but gold text exists (only evidence recall)
-                for a in fewshot_answers:
-                    factual_fs.append(FactualScores(0.0, evidence_ngram_recall(a, gold_text)))
-                for a in zeroshot_answers:
-                    factual_zs.append(FactualScores(0.0, evidence_ngram_recall(a, gold_text)))
-
-        # 5. Diversity & Qualitative
-        diversity_fs = {f"distinct-{n}": distinct_n(fewshot_answers, n) for n in (1, 2, 3)}
-        diversity_zs = {f"distinct-{n}": distinct_n(zeroshot_answers, n) for n in (1, 2, 3)}
-        diff_tokens = qualitative_diff(fewshot_answers, zeroshot_answers, top_k=20)
-        worst_fs = worst_examples(reference, fewshot_answers[1:], k=3)
-        worst_zs = worst_examples(reference, zeroshot_answers, k=3)
-
-        results = {
-            "fewshot_answers": fewshot_answers,
-            "zeroshot_answers": zeroshot_answers,
-            "metrics_fs": metrics_fs,
-            "metrics_zs": metrics_zs,
-            "diversity_fs": diversity_fs,
-            "diversity_zs": diversity_zs,
-            "diff_tokens": diff_tokens,
-            "worst_fs": worst_fs,
-            "worst_zs": worst_zs,
-            "reference": reference,
-            "factual_fs": factual_fs,
-            "factual_zs": factual_zs
-        }
-
-        # 6. Log to DB
-        try:
-            db_path = "runs/eval_runs.sqlite"
-            init_sqlite(db_path)
-            run_id = f"run_{int(time.time())}"
-            meta = {
-                "query": query,
-                "model": model_name,
-                "runs": runs,
-                "fewshot_file": "Ontology.txt", # simplified
-                "gold_file": "User Input" if gold_text else ""
-            }
-            log_to_sqlite(db_path, run_id, meta, results)
-        except Exception as e:
-            print(f"DB Log Error: {e}")
-
-        return results
-
-    def run_batch_evaluation(
-        self,
-        queries: List[str],
-        fewshot_doc: str,
-        runs: int = 3,
-        model_name: str = "gemini-1.5-flash",
-        gold_texts: Optional[List[str]] = None,
-        enable_factual: bool = False,
-        progress_callback: Callable[[float, str], None] | None = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Runs evaluation for a list of queries.
-        """
-        batch_results = []
-        total_queries = len(queries)
-        
-        for idx, query in enumerate(queries):
-            gold = gold_texts[idx] if gold_texts and idx < len(gold_texts) else None
-            
-            # Update progress for the batch
-            if progress_callback:
-                progress_callback(idx / total_queries, f"Processing Query {idx+1}/{total_queries}...")
-            
-            # Run single evaluation
-            # Note: We pass None for progress_callback to avoid nested progress updates conflicting
-            res = self.run_evaluation(
-                query=query,
-                fewshot_doc=fewshot_doc,
-                runs=runs,
-                model_name=model_name,
-                gold_text=gold,
-                enable_factual=enable_factual,
-                progress_callback=None 
-            )
-            batch_results.append(res)
-            
-        if progress_callback:
-            progress_callback(1.0, "Batch Evaluation Complete!")
-            
-        return batch_results
-
-def export_for_human_eval(batch_results: List[Dict[str, Any]], queries: List[str], filename: str = "human_eval.csv"):
-    """
-    Exports batch results to a CSV format suitable for human evaluation.
-    Columns: Query, Mode, Answer, Reference (Gold), Human_Score (Empty)
-    """
-    import pandas as pd
-    
-    rows = []
-    for i, res in enumerate(batch_results):
-        query = queries[i]
-        
-        # Few-shot answers
-        for ans in res["fewshot_answers"]:
-            rows.append({
-                "Query": query,
-                "Mode": "Few-shot",
-                "Answer": ans,
-                "Reference": res.get("reference", ""), # First few-shot answer is used as ref in single eval, but maybe gold is better if available
-                "Human_Score": ""
-            })
-            
-        # Zero-shot answers
-        for ans in res["zeroshot_answers"]:
-            rows.append({
-                "Query": query,
-                "Mode": "Zero-shot",
-                "Answer": ans,
-                "Reference": res.get("reference", ""),
-                "Human_Score": ""
-            })
-            
-    df = pd.DataFrame(rows)
-    df.to_csv(filename, index=False, encoding="utf-8-sig")
-    return filename
 # -------------------------- Thesis Evaluation (T1, T2, T3) --------------------------
 from modules.ontology_manager import OntologyManager
 from modules.rag_engine import HybridRetriever
@@ -575,91 +187,139 @@ class ThesisEvaluator:
         
     def run_thesis_evaluation(self, dataset_path: str = "evaluation_dataset.json", output_path: str = "thesis_eval_results.json"):
         import json
+        import time 
+        
+        debug_log_path = "debug_eval_log.txt"
+        with open(debug_log_path, "w", encoding="utf-8") as dlog:
+            dlog.write("--- Debug Log for Thesis Evaluation ---\n") 
         
         with open(dataset_path, "r", encoding="utf-8") as f:
             dataset = json.load(f)
             
         results = []
-        print(f"Starting evaluation on {len(dataset)} items...")
+        print(f"Starting Comparative Evaluation (Zero-shot vs Few-shot/RAG) on {len(dataset)} items...")
         
-        score_acc = 0.0
-        score_cite = 0.0
-        
-        for data in dataset:
+        for i, data in enumerate(dataset):
             print(f"Testing [{data['id']}]: {data['query']}")
             
-            # 1. Execute RAG Pipeline
+            # Rate Limiting: Minimal sleep for OpenAI (optional, just to be safe)
+            if i > 0:
+                time.sleep(1)
+
+            # --- 1. Zero-shot Generation (Baseline) ---
             try:
-                # Retrieve
+                # No context provided
+                zs_response = self.llm.generate_response(data['query'], context_str="")
+            except Exception as e:
+                print(f"Zero-shot Error: {e}")
+                zs_response = ""
+
+            # --- 2. Few-shot/RAG Generation (Proposed) ---
+            try:
                 context_items = self.retriever.semantic_search(data['query'])
                 context_str = self.retriever.format_context_for_llm(context_items)
-                
-                # Generate
-                response_text = self.llm.generate_response(data['query'], context_str, retrieved_items=context_items)
-                
-                # Collect Cited URIs from Context (Assumption: if retrieved, it's 'cited' in context)
-                # Ideally, we check if the LLM explicitly mentioned them, but for 'Citation Check' -> 'Retrieval Recall' is often used
+                fs_response = self.llm.generate_response(data['query'], context_str, retrieved_items=context_items)
                 retrieved_uris = [item['uri'] for item in context_items]
-                
             except Exception as e:
-                print(f"Error processing {data['id']}: {e}")
-                response_text = ""
+                print(f"Few-shot Error: {e}")
+                fs_response = str(e)
                 retrieved_uris = []
+            
+            # --- Debug Log ---
+            with open("debug_eval_log.txt", "a", encoding="utf-8") as dlog:
+                dlog.write(f"\n[{data['id']}] {data['query']}\n")
+                dlog.write(f"  ZS Response: {zs_response}\n")
+                dlog.write(f"  FS Response: {fs_response}\n")
+                dlog.write(f"  FS Retrieved: {retrieved_uris}\n")
+            
+            # --- 3. Metrics Calculation ---
+            
+            # Helper to calculate accuracy based on keyword labels
+            def calc_accuracy(text, labels):
+                if not labels: return 0.0
+                norm_text = normalize_text(text).lower()
+                hits = sum(1 for label in labels if label.lower() in norm_text)
+                return hits / len(labels)
 
-            # 2. Calculate Metrics
-            # A. Label Accuracy (Keyword Match)
-            # Normalize response
-            norm_resp = normalize_text(response_text).lower()
-            hit_count = 0
-            for label in data['ground_truth_labels']:
-                if label.lower() in norm_resp:
-                    hit_count += 1
-            accuracy = hit_count / len(data['ground_truth_labels']) if data['ground_truth_labels'] else 0.0
-            
-            # B. Citation/Retrieval Recall
-            # Check if ground_truth_uri is in retrieved_uris
+            # Ground Truths
+            gt_labels = data['ground_truth_labels']
             gt_uris = data['ground_truth_uri']
-            if isinstance(gt_uris, str):
-                gt_uris = [gt_uris]
+            if isinstance(gt_uris, str): gt_uris = [gt_uris]
             
-            # Check if ANY of the GT URIs were retrieved
-            # OR if the URI is mentioned in the text (if generation capability is being tested)
+            # A. Label Accuracy
+            acc_zs = calc_accuracy(zs_response, gt_labels)
+            acc_fs = calc_accuracy(fs_response, gt_labels)
+            
+            # B. Citation Recall (Only relevant for RAG)
             citation_hit = any(u in retrieved_uris for u in gt_uris)
             citation_score = 1.0 if citation_hit else 0.0
             
-            score_acc += accuracy
-            score_cite += citation_score
+            # C. NLP Metrics (BERTScore, ROUGE)
+            pseudo_ref = " ".join(gt_labels)
             
+            # ROUGE-L
+            rouge_zs = rouge_l_f1(pseudo_ref, zs_response)
+            rouge_fs = rouge_l_f1(pseudo_ref, fs_response)
+            
+            # BERTScore
+            bert_zs = bertscore_f1(pseudo_ref, zs_response)
+            bert_fs = bertscore_f1(pseudo_ref, fs_response)
+
             result_entry = {
                 "id": data['id'],
                 "query": data['query'],
-                "response": response_text,
-                "retrieved_uris": retrieved_uris,
-                "metrics": {
-                    "accuracy": accuracy,
-                    "citation_hit": citation_score
+                "zero_shot": {
+                    "response": zs_response,
+                    "metrics": {
+                        "accuracy": acc_zs,
+                        "rouge_l": rouge_zs,
+                        "bert_score": bert_zs
+                    }
+                },
+                "few_shot": {
+                    "response": fs_response,
+                    "retrieved_uris": retrieved_uris,
+                    "metrics": {
+                        "accuracy": acc_fs,
+                        "citation_hit": citation_score,
+                        "rouge_l": rouge_fs,
+                        "bert_score": bert_fs
+                    }
                 }
             }
             results.append(result_entry)
-            print(f"  -> Acc: {accuracy:.2f}, Cite: {citation_score}")
+            print(f"  Result -> ZS Acc: {acc_zs:.2f} | FS Acc: {acc_fs:.2f} (Cite: {citation_score})")
 
-        # Summary
-        avg_acc = score_acc / len(dataset) if dataset else 0.0
-        avg_cite = score_cite / len(dataset) if dataset else 0.0
-        
+        # Summary Statistics
+        def avg(key, subkey):
+            vals = [r[key]["metrics"][subkey] for r in results]
+            valid_vals = [v for v in vals if isinstance(v, (int, float)) and not math.isnan(v)]
+            return sum(valid_vals) / len(valid_vals) if valid_vals else 0.0
+
         summary = {
             "total_samples": len(dataset),
-            "average_accuracy": avg_acc,
-            "average_citation_recall": avg_cite,
+            "averages": {
+                "zero_shot": {
+                    "accuracy": avg("zero_shot", "accuracy"),
+                    "rouge_l": avg("zero_shot", "rouge_l"),
+                    "bert_score": avg("zero_shot", "bert_score")
+                },
+                "few_shot": {
+                    "accuracy": avg("few_shot", "accuracy"),
+                    "citation_recall": avg("few_shot", "citation_hit"),
+                    "rouge_l": avg("few_shot", "rouge_l"),
+                    "bert_score": avg("few_shot", "bert_score")
+                }
+            },
             "details": results
         }
         
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
             
-        print(f"\nEvaluation Complete!")
-        print(f"Average Accuracy (Label Match): {avg_acc:.2f}")
-        print(f"Average Citation/Retrieval: {avg_cite:.2f}")
+        print(f"\nComparative Evaluation Complete!")
+        print(f"ZS Accuracy: {summary['averages']['zero_shot']['accuracy']:.2f} | FS Accuracy: {summary['averages']['few_shot']['accuracy']:.2f}")
+        print(f"ZS BERTScore: {summary['averages']['zero_shot']['bert_score']:.2f} | FS BERTScore: {summary['averages']['few_shot']['bert_score']:.2f}")
         print(f"Results saved to {output_path}")
         
         return summary

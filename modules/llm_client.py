@@ -1,34 +1,14 @@
-import google.generativeai as genai
+from openai import OpenAI
 import json
 import os
 
 class LLMClient:
     def __init__(self, api_key):
-        genai.configure(api_key=api_key)
-        self.model_name = 'gemini-2.5-flash' # Updated to a known valid model name just in case, or keep 'gemini-flash-latest'
-        self.model = genai.GenerativeModel(self.model_name)
+        self.client = OpenAI(api_key=api_key)
+        self.model_name = "gpt-4o-mini" # User requested model
+        self.embedding_model = "text-embedding-3-small"
 
-    def generate_response(self, prompt, context, system_instruction=None):
-        """
-        Geminiを使用したテキスト生成（JSON制約なし）
-        """
-        system_prompt = """
-        あなたは建築の専門家であるAIアシスタントです。
-        提供されたコンテキスト（オントロジー情報）を使用して、ユーザーの質問に答えてください。
-
-        ルール：
-        1. 自然な日本語で回答してください。
-        2. オントロジーに含まれる情報（クラス、個体、プロパティ）に基づいて回答し、事実に基づかない捏造は避けてください。
-        3. 専門用語や固有名詞は正確に使用してください。
-        4. コンテキストに情報がない場合は、正直に「情報がありません」と答えてください。
-        """
-
-        if system_instruction:
-            # カスタムシステムプロンプトが提供された場合、それを使用
-            final_system_prompt = system_instruction
-        else:
-            # デフォルトのシステムプロンプト
-            final_system_prompt = system_prompt
+    def generate_fewshot_examples(self, retrieved_items):
         """
         検索されたエンティティを元に、Few-Shot（Q&A）形式の例を生成する
         """
@@ -49,10 +29,9 @@ Example A: {item['name']} (URI: {item['uri']}) is a {', '.join(item['type'])}. I
             examples = self.generate_fewshot_examples(retrieved_items)
             few_shot_section = f"\nRefer to these similar cases for style:\n{examples}\n"
 
-        system_instruction = "You are an expert architect assistant. Use the provided context to answer."
-        final_prompt = f"""
-{system_instruction}
-
+        system_instruction = "You are an expert architect assistant. Use the provided context to answer. If no context is provided, answer based on your general knowledge."
+        
+        user_content = f"""
 Context from Ontology:
 {context_str}
 
@@ -62,8 +41,15 @@ Question: {prompt}
 Answer:
 """
         try:
-            response = self.model.generate_content(final_prompt)
-            return response.text
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_content}
+                ],
+                temperature=0.0
+            )
+            return response.choices[0].message.content.strip()
         except Exception as e:
             return f"Error generating response: {str(e)}"
 
@@ -72,13 +58,11 @@ Answer:
         テキストの埋め込みベクトルを取得
         """
         try:
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_document",
-                title="Ontology Entity"
+            response = self.client.embeddings.create(
+                model=self.embedding_model,
+                input=text
             )
-            return result['embedding']
+            return response.data[0].embedding
         except Exception as e:
             print(f"Error generating embedding: {e}")
             return []
@@ -104,8 +88,16 @@ Answer:
         """
         
         try:
-            response = self.model.generate_content(prompt)
-            clean_text = response.text.replace("```json", "").replace("```", "").strip()
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": "You are a data extraction assistant. Return purely JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"} # Force JSON mode
+            )
+            clean_text = response.choices[0].message.content.strip()
             return json.loads(clean_text)
         except Exception as e:
             print(f"Error parsing building info: {e}")

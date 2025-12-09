@@ -7,7 +7,7 @@
             "旧耐震基準",
             "1978"
         ],
-        "ground_truth_uri": "http://example.org/seismic_architecture#Sunshine60",
+        "ground_truth_uri": "http://example.org/seismic_architecture#サンシャイン60",
         "logic_rule": "Year(1978) < 1981 implies OldSeismicStandard",
         "description": "1981年以前の建物が正しく分類されるか"
     },
@@ -21,7 +21,7 @@
             "2012",
             "2000年基準"
         ],
-        "ground_truth_uri": "http://example.org/seismic_architecture#TokyoSkytree",
+        "ground_truth_uri": "http://example.org/seismic_architecture#東京スカイツリー",
         "logic_rule": "Year(2012) >= 2000 implies 2000Standard",
         "description": "2000年以降の建物が正しく分類されるか"
     },
@@ -33,7 +33,7 @@
             "旧耐震基準",
             "1974"
         ],
-        "ground_truth_uri": "http://example.org/seismic_architecture#ShinjukuMitsuiBuilding",
+        "ground_truth_uri": "http://example.org/seismic_architecture#新宿三井ビルディング",
         "logic_rule": "Year(1974) < 1981 implies OldSeismicStandard",
         "description": "旧耐震かつ高層建築物の判定"
     },
@@ -47,7 +47,7 @@
             "300m",
             "S造"
         ],
-        "ground_truth_uri": "http://example.org/seismic_architecture#AbenoHarukas",
+        "ground_truth_uri": "http://example.org/seismic_architecture#あべのハルカス",
         "logic_rule": "Height(300) >= 60 AND Structure(S造) implies LongPeriodMotionCaution",
         "description": "高さと構造の複合ルールの検証"
     },
@@ -60,7 +60,7 @@
             "1609",
             "木造"
         ],
-        "ground_truth_uri": "http://example.org/seismic_architecture#HimejiCastle",
+        "ground_truth_uri": "http://example.org/seismic_architecture#姫路城",
         "logic_rule": "Year(1609) < 1950 AND Structure(Wood) implies HistoricalHeritage",
         "description": "歴史的建築物の分類ルールの検証"
     },
@@ -74,7 +74,7 @@
             "32m",
             "木造"
         ],
-        "ground_truth_uri": "http://example.org/seismic_architecture#HoryujiPagoda",
+        "ground_truth_uri": "http://example.org/seismic_architecture#法隆寺五重塔",
         "logic_rule": "Height(32) < 60 OR Structure(Wood) != Steel implies NOT LongPeriodMotionCaution",
         "description": "条件を満たさない場合の否定推論の検証"
     },
@@ -89,8 +89,8 @@
             "新耐震"
         ],
         "ground_truth_uri": [
-            "http://example.org/seismic_architecture#TokyoTower",
-            "http://example.org/seismic_architecture#TokyoSkytree"
+            "http://example.org/seismic_architecture#東京タワー",
+            "http://example.org/seismic_architecture#東京スカイツリー"
         ],
         "logic_rule": "Compare attributes of two instances",
         "description": "複数エンティティの同時検索と比較"
@@ -102,7 +102,7 @@
         "ground_truth_labels": [
             "東日本大震災津波伝承館"
         ],
-        "ground_truth_uri": "http://example.org/seismic_architecture#IwateTsunamiMemorial",
+        "ground_truth_uri": "http://example.org/seismic_architecture#いわてTSUNAMIメモリアル",
         "logic_rule": "Filter by specific property tag",
         "description": "特定のプロパティを持つインスタンスの検索"
     }

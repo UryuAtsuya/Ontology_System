@@ -6,6 +6,9 @@
 __pycache__/
 *.pyc
 
+# Streamlit
+.streamlit/secrets.toml
+
 # Temporary/Output Data
 temp_*.owl
 eval_result_*.txt
@@ -13,3 +16,5 @@ inference_results/
 runs/
 debug_log.txt
 test_old_runs1.txt
+thesis_eval_results.json
+evaluation_dataset.json

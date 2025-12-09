@@ -560,3 +560,106 @@ def export_for_human_eval(batch_results: List[Dict[str, Any]], queries: List[str
     df = pd.DataFrame(rows)
     df.to_csv(filename, index=False, encoding="utf-8-sig")
     return filename
+# -------------------------- Thesis Evaluation (T1, T2, T3) --------------------------
+from modules.ontology_manager import OntologyManager
+from modules.rag_engine import HybridRetriever
+from modules.llm_client import LLMClient
+
+class ThesisEvaluator:
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        print("Initializing System components...")
+        self.mgr = OntologyManager() # Loads temp_Ontology.owl by default
+        self.llm = LLMClient(api_key)
+        self.retriever = HybridRetriever(self.mgr, self.llm)
+        
+    def run_thesis_evaluation(self, dataset_path: str = "evaluation_dataset.json", output_path: str = "thesis_eval_results.json"):
+        import json
+        
+        with open(dataset_path, "r", encoding="utf-8") as f:
+            dataset = json.load(f)
+            
+        results = []
+        print(f"Starting evaluation on {len(dataset)} items...")
+        
+        score_acc = 0.0
+        score_cite = 0.0
+        
+        for data in dataset:
+            print(f"Testing [{data['id']}]: {data['query']}")
+            
+            # 1. Execute RAG Pipeline
+            try:
+                # Retrieve
+                context_items = self.retriever.semantic_search(data['query'])
+                context_str = self.retriever.format_context_for_llm(context_items)
+                
+                # Generate
+                response_text = self.llm.generate_response(data['query'], context_str, retrieved_items=context_items)
+                
+                # Collect Cited URIs from Context (Assumption: if retrieved, it's 'cited' in context)
+                # Ideally, we check if the LLM explicitly mentioned them, but for 'Citation Check' -> 'Retrieval Recall' is often used
+                retrieved_uris = [item['uri'] for item in context_items]
+                
+            except Exception as e:
+                print(f"Error processing {data['id']}: {e}")
+                response_text = ""
+                retrieved_uris = []
+
+            # 2. Calculate Metrics
+            # A. Label Accuracy (Keyword Match)
+            # Normalize response
+            norm_resp = normalize_text(response_text).lower()
+            hit_count = 0
+            for label in data['ground_truth_labels']:
+                if label.lower() in norm_resp:
+                    hit_count += 1
+            accuracy = hit_count / len(data['ground_truth_labels']) if data['ground_truth_labels'] else 0.0
+            
+            # B. Citation/Retrieval Recall
+            # Check if ground_truth_uri is in retrieved_uris
+            gt_uris = data['ground_truth_uri']
+            if isinstance(gt_uris, str):
+                gt_uris = [gt_uris]
+            
+            # Check if ANY of the GT URIs were retrieved
+            # OR if the URI is mentioned in the text (if generation capability is being tested)
+            citation_hit = any(u in retrieved_uris for u in gt_uris)
+            citation_score = 1.0 if citation_hit else 0.0
+            
+            score_acc += accuracy
+            score_cite += citation_score
+            
+            result_entry = {
+                "id": data['id'],
+                "query": data['query'],
+                "response": response_text,
+                "retrieved_uris": retrieved_uris,
+                "metrics": {
+                    "accuracy": accuracy,
+                    "citation_hit": citation_score
+                }
+            }
+            results.append(result_entry)
+            print(f"  -> Acc: {accuracy:.2f}, Cite: {citation_score}")
+
+        # Summary
+        avg_acc = score_acc / len(dataset) if dataset else 0.0
+        avg_cite = score_cite / len(dataset) if dataset else 0.0
+        
+        summary = {
+            "total_samples": len(dataset),
+            "average_accuracy": avg_acc,
+            "average_citation_recall": avg_cite,
+            "details": results
+        }
+        
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+            
+        print(f"\nEvaluation Complete!")
+        print(f"Average Accuracy (Label Match): {avg_acc:.2f}")
+        print(f"Average Citation/Retrieval: {avg_cite:.2f}")
+        print(f"Results saved to {output_path}")
+        
+        return summary

@@ -254,7 +254,7 @@ class ThesisEvaluator:
             citation_hit = any(u in retrieved_uris for u in gt_uris)
             citation_score = 1.0 if citation_hit else 0.0
             
-            # C. NLP Metrics (BERTScore, ROUGE)
+            # C. NLP Metrics (BERTScore, ROUGE, Token-F1, chrF)
             pseudo_ref = " ".join(gt_labels)
             
             # ROUGE-L
@@ -264,6 +264,31 @@ class ThesisEvaluator:
             # BERTScore
             bert_zs = bertscore_f1(pseudo_ref, zs_response)
             bert_fs = bertscore_f1(pseudo_ref, fs_response)
+            
+            # Token-F1
+            tok_f1_zs = token_f1(pseudo_ref, zs_response)
+            tok_f1_fs = token_f1(pseudo_ref, fs_response)
+            
+            # chrF
+            chrf_zs = chrF(pseudo_ref, zs_response)
+            chrf_fs = chrF(pseudo_ref, fs_response)
+            
+            # D. Retrieval Metrics (Precision, nDCG)
+            # Find rank of first correct URI
+            rank = -1
+            for idx, r_uri in enumerate(retrieved_uris):
+                if r_uri in gt_uris:
+                    rank = idx + 1
+                    break
+            
+            if rank > 0:
+                ndcg_10 = 1.0 / math.log2(rank + 1)
+            else:
+                ndcg_10 = 0.0
+                
+            # Citation Precision
+            relevant_count = sum(1 for r_uri in retrieved_uris if r_uri in gt_uris)
+            citation_precision = relevant_count / len(retrieved_uris) if retrieved_uris else 0.0
 
             result_entry = {
                 "id": data['id'],
@@ -273,7 +298,9 @@ class ThesisEvaluator:
                     "metrics": {
                         "accuracy": acc_zs,
                         "rouge_l": rouge_zs,
-                        "bert_score": bert_zs
+                        "bert_score": bert_zs,
+                        "token_f1": tok_f1_zs,
+                        "chrf": chrf_zs
                     }
                 },
                 "few_shot": {
@@ -281,14 +308,18 @@ class ThesisEvaluator:
                     "retrieved_uris": retrieved_uris,
                     "metrics": {
                         "accuracy": acc_fs,
-                        "citation_hit": citation_score,
+                        "citation_hit": citation_score, # This effectively acts as Recall@k if k=len(retrieved)
+                        "citation_precision": citation_precision,
+                        "ndcg_10": ndcg_10,
                         "rouge_l": rouge_fs,
-                        "bert_score": bert_fs
+                        "bert_score": bert_fs,
+                        "token_f1": tok_f1_fs,
+                        "chrf": chrf_fs
                     }
                 }
             }
             results.append(result_entry)
-            print(f"  Result -> ZS Acc: {acc_zs:.2f} | FS Acc: {acc_fs:.2f} (Cite: {citation_score})")
+            print(f"  Result -> ZS Acc: {acc_zs:.2f} | FS Acc: {acc_fs:.2f} (Cite Recall: {citation_score:.2f}, Prec: {citation_precision:.2f}, nDCG: {ndcg_10:.2f})")
 
         # Summary Statistics
         def avg(key, subkey):
@@ -302,13 +333,19 @@ class ThesisEvaluator:
                 "zero_shot": {
                     "accuracy": avg("zero_shot", "accuracy"),
                     "rouge_l": avg("zero_shot", "rouge_l"),
-                    "bert_score": avg("zero_shot", "bert_score")
+                    "bert_score": avg("zero_shot", "bert_score"),
+                    "token_f1": avg("zero_shot", "token_f1"),
+                    "chrf": avg("zero_shot", "chrf")
                 },
                 "few_shot": {
                     "accuracy": avg("few_shot", "accuracy"),
                     "citation_recall": avg("few_shot", "citation_hit"),
+                    "citation_precision": avg("few_shot", "citation_precision"),
+                    "ndcg_10": avg("few_shot", "ndcg_10"),
                     "rouge_l": avg("few_shot", "rouge_l"),
-                    "bert_score": avg("few_shot", "bert_score")
+                    "bert_score": avg("few_shot", "bert_score"),
+                    "token_f1": avg("few_shot", "token_f1"),
+                    "chrf": avg("few_shot", "chrf")
                 }
             },
             "details": results
@@ -320,6 +357,7 @@ class ThesisEvaluator:
         print(f"\nComparative Evaluation Complete!")
         print(f"ZS Accuracy: {summary['averages']['zero_shot']['accuracy']:.2f} | FS Accuracy: {summary['averages']['few_shot']['accuracy']:.2f}")
         print(f"ZS BERTScore: {summary['averages']['zero_shot']['bert_score']:.2f} | FS BERTScore: {summary['averages']['few_shot']['bert_score']:.2f}")
+        print(f"FS nDCG@10: {summary['averages']['few_shot']['ndcg_10']:.2f} | FS Citation Precision: {summary['averages']['few_shot']['citation_precision']:.2f}")
         print(f"Results saved to {output_path}")
         
         return summary

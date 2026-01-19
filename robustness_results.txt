@@ -1,0 +1,6 @@
+
+### 表1: 手法別安定性評価結果 (5 Runs)
+| Method | ROUGE-L | BERTScore | chrF | HR (Low is better) | CSR (High is better) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Proposed (RAG)** | 0.076 | 0.603 | 0.082 | **0.00%** | **100.00%** |
+| **Zero-shot** | 0.075 | 0.602 | 0.068 | 10.00% | 100.00% |

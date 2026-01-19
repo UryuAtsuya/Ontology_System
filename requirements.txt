@@ -1,7 +1,7 @@
 streamlit
 owlready2
 graphviz
-google-generativeai
+openai
 
 pandas
 networkx

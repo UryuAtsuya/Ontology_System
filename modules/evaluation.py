@@ -9,7 +9,7 @@ import re
 from typing import List, Tuple, Dict, Any, Callable, Optional
 from dataclasses import dataclass, asdict
 from collections import Counter
-import google.generativeai as genai
+
 
 # -------------------------- optional deps --------------------------
 # rapidfuzz Levenshtein (fast); fallback to pure python
@@ -37,12 +37,8 @@ except Exception:
                 prev = temp
         return dp[-1]
 
-# bert_score
-_BERT_OK = True
-try:
-    import bert_score  # type: ignore
-except Exception:
-    _BERT_OK = False
+# bert_score (Lazy import in bertscore_f1)
+_BERT_OK = False
 
 # transformers (NLI)
 _TRANSFORMERS_OK = True
@@ -60,7 +56,8 @@ def normalize_text(s: str) -> str:
     return s
 
 def tokenize_words(s: str) -> List[str]:
-    return normalize_text(s).lower().split()
+    # Use character-level tokenization for Japanese robustness
+    return list(normalize_text(s).lower())
 
 def ngrams(tokens: List[str], n: int) -> List[Tuple[str, ...]]:
     return [tuple(tokens[i:i+n]) for i in range(len(tokens)-n+1)]
@@ -154,23 +151,25 @@ def rouge_l_f1(reference: str, candidate: str) -> float:
     if prec + rec == 0: return 0.0
     return 2 * prec * rec / (prec + rec)
 
+# ...
+
 def bertscore_f1(reference: str, candidate: str) -> float:
     if not _BERT_OK:
-        return float('nan')
+        return 0.0
     try:
         # Default with baseline rescale
         P, R, F1 = bert_score.score([candidate], [reference], lang="ja", rescale_with_baseline=True)
         return float(F1[0])
     except Exception as e:
         # Debug print
-        # print(f"[BERTScore Error] {e}") 
+        print(f"[BERTScore Error] {e}") 
         try:
             # Fallback without rescale
             P, R, F1 = bert_score.score([candidate], [reference], lang="ja", rescale_with_baseline=False)
             return float(F1[0])
         except Exception as e2:
             print(f"[BERTScore Failed] {e2}")
-            return float('nan')
+            return 0.0
 
 # -------------------------- Thesis Evaluation (T1, T2, T3) --------------------------
 from modules.ontology_manager import OntologyManager
@@ -254,7 +253,7 @@ class ThesisEvaluator:
             citation_hit = any(u in retrieved_uris for u in gt_uris)
             citation_score = 1.0 if citation_hit else 0.0
             
-            # C. NLP Metrics (BERTScore, ROUGE, Token-F1, chrF)
+            # C. NLP Metrics (BERTScore, ROUGE, Token-F1, chrF, EditSim, Jaccard)
             pseudo_ref = " ".join(gt_labels)
             
             # ROUGE-L
@@ -272,6 +271,14 @@ class ThesisEvaluator:
             # chrF
             chrf_zs = chrF(pseudo_ref, zs_response)
             chrf_fs = chrF(pseudo_ref, fs_response)
+            
+            # EditSim
+            editsim_zs = edit_sim(pseudo_ref, zs_response)
+            editsim_fs = edit_sim(pseudo_ref, fs_response)
+            
+            # Jaccard
+            jaccard_zs = jaccard(pseudo_ref, zs_response)
+            jaccard_fs = jaccard(pseudo_ref, fs_response)
             
             # D. Retrieval Metrics (Precision, nDCG)
             # Find rank of first correct URI
@@ -300,7 +307,9 @@ class ThesisEvaluator:
                         "rouge_l": rouge_zs,
                         "bert_score": bert_zs,
                         "token_f1": tok_f1_zs,
-                        "chrf": chrf_zs
+                        "chrf": chrf_zs,
+                        "edit_sim": editsim_zs,
+                        "jaccard": jaccard_zs
                     }
                 },
                 "few_shot": {
@@ -314,7 +323,9 @@ class ThesisEvaluator:
                         "rouge_l": rouge_fs,
                         "bert_score": bert_fs,
                         "token_f1": tok_f1_fs,
-                        "chrf": chrf_fs
+                        "chrf": chrf_fs,
+                        "edit_sim": editsim_fs,
+                        "jaccard": jaccard_fs
                     }
                 }
             }
@@ -335,7 +346,9 @@ class ThesisEvaluator:
                     "rouge_l": avg("zero_shot", "rouge_l"),
                     "bert_score": avg("zero_shot", "bert_score"),
                     "token_f1": avg("zero_shot", "token_f1"),
-                    "chrf": avg("zero_shot", "chrf")
+                    "chrf": avg("zero_shot", "chrf"),
+                    "edit_sim": avg("zero_shot", "edit_sim"),
+                    "jaccard": avg("zero_shot", "jaccard")
                 },
                 "few_shot": {
                     "accuracy": avg("few_shot", "accuracy"),
@@ -345,7 +358,9 @@ class ThesisEvaluator:
                     "rouge_l": avg("few_shot", "rouge_l"),
                     "bert_score": avg("few_shot", "bert_score"),
                     "token_f1": avg("few_shot", "token_f1"),
-                    "chrf": avg("few_shot", "chrf")
+                    "chrf": avg("few_shot", "chrf"),
+                    "edit_sim": avg("few_shot", "edit_sim"),
+                    "jaccard": avg("few_shot", "jaccard")
                 }
             },
             "details": results
